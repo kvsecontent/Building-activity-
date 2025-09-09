@@ -223,6 +223,13 @@
             border-style: dashed;
         }
 
+        .apartment.drag-over {
+            border-color: #4CAF50;
+            background: #E8F5E8;
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(76, 175, 80, 0.6);
+        }
+
         .apartment:hover {
             transform: scale(1.1);
             z-index: 10;
@@ -434,6 +441,7 @@
             border-color: #4CAF50;
             background: #E8F5E8;
             transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(76, 175, 80, 0.6);
         }
 
         .drop-zone.filled {
@@ -537,6 +545,18 @@
             display: block;
         }
 
+        /* Touch-specific styles */
+        .touch-instruction {
+            background: #E3F2FD;
+            border: 2px solid #1976D2;
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 15px;
+            text-align: center;
+            color: #1976D2;
+            font-weight: bold;
+        }
+
         /* Animations */
         @keyframes celebrate {
             0% { transform: scale(1) rotate(0deg); }
@@ -582,6 +602,24 @@
             border-radius: 50%;
             pointer-events: none;
             z-index: 1000;
+        }
+
+        /* Touch device optimizations */
+        @media (max-width: 768px) {
+            .building-container {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .number-card, .quiz-option {
+                min-height: 48px;
+                min-width: 60px;
+            }
+            
+            .apartment {
+                min-width: 40px;
+                min-height: 40px;
+            }
         }
     </style>
 </head>
@@ -709,6 +747,14 @@
         const studentAnswers = {};
         let draggedElement = null;
 
+        // Touch support variables
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchElement = null;
+        let touchClone = null;
+        let touchOffset = { x: 0, y: 0 };
+        let isTouchDevice = false;
+
         // Generate all apartment numbers 101-200
         for (let i = 101; i <= 200; i++) {
             allNumbers.push(i);
@@ -815,6 +861,65 @@
         let quizScore = 0;
         let draggedQuizElement = null;
 
+        // Touch detection and utility functions
+        function detectTouchDevice() {
+            isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0;
+            return isTouchDevice;
+        }
+
+        function getTouchPos(e) {
+            const touch = e.touches[0] || e.changedTouches[0];
+            return {
+                x: touch.clientX,
+                y: touch.clientY
+            };
+        }
+
+        function createTouchClone(element, touchPos) {
+            const clone = element.cloneNode(true);
+            clone.id = 'touch-clone';
+            clone.style.position = 'fixed';
+            clone.style.pointerEvents = 'none';
+            clone.style.zIndex = '10000';
+            clone.style.opacity = '0.8';
+            clone.style.transform = 'scale(1.1) rotate(3deg)';
+            clone.style.transition = 'none';
+            clone.style.boxShadow = '0 8px 20px rgba(0,0,0,0.3)';
+            
+            // Position the clone at touch position
+            const rect = element.getBoundingClientRect();
+            touchOffset.x = touchPos.x - rect.left;
+            touchOffset.y = touchPos.y - rect.top;
+            
+            clone.style.left = (touchPos.x - touchOffset.x) + 'px';
+            clone.style.top = (touchPos.y - touchOffset.y) + 'px';
+            
+            document.body.appendChild(clone);
+            return clone;
+        }
+
+        function updateTouchClone(touchPos) {
+            if (touchClone) {
+                touchClone.style.left = (touchPos.x - touchOffset.x) + 'px';
+                touchClone.style.top = (touchPos.y - touchOffset.y) + 'px';
+            }
+        }
+
+        function removeTouchClone() {
+            if (touchClone) {
+                document.body.removeChild(touchClone);
+                touchClone = null;
+            }
+        }
+
+        function getElementAtPosition(x, y) {
+            // Temporarily hide the clone to get element underneath
+            if (touchClone) touchClone.style.display = 'none';
+            const element = document.elementFromPoint(x, y);
+            if (touchClone) touchClone.style.display = 'block';
+            return element;
+        }
+
         // Initialize Building Activity
         function initializeActivity() {
             createApartmentGrid();
@@ -859,8 +964,16 @@
                 card.textContent = number;
                 card.dataset.number = number;
                 card.draggable = true;
+                
+                // Mouse events
                 card.addEventListener('dragstart', handleDragStart);
                 card.addEventListener('dragend', handleDragEnd);
+                
+                // Touch events
+                card.addEventListener('touchstart', handleTouchStart, { passive: false });
+                card.addEventListener('touchmove', handleTouchMove, { passive: false });
+                card.addEventListener('touchend', handleTouchEnd, { passive: false });
+                
                 cardsContainer.appendChild(card);
             });
         }
@@ -905,6 +1018,97 @@
                     setTimeout(() => { e.target.style.background = ''; }, 1000);
                 }
             }
+        }
+
+        // Touch Event Handlers for Building Activity
+        function handleTouchStart(e) {
+            if (e.target.classList.contains('used')) return;
+            
+            e.preventDefault();
+            const touchPos = getTouchPos(e);
+            touchStartX = touchPos.x;
+            touchStartY = touchPos.y;
+            touchElement = e.target;
+            
+            // Add visual feedback
+            e.target.classList.add('dragging');
+            
+            // Create clone after a short delay to avoid accidental drags
+            setTimeout(() => {
+                if (touchElement === e.target) {
+                    touchClone = createTouchClone(e.target, touchPos);
+                }
+            }, 100);
+        }
+
+        function handleTouchMove(e) {
+            if (!touchElement) return;
+            e.preventDefault();
+            
+            const touchPos = getTouchPos(e);
+            const deltaX = Math.abs(touchPos.x - touchStartX);
+            const deltaY = Math.abs(touchPos.y - touchStartY);
+            
+            // Start dragging if moved enough
+            if (deltaX > 10 || deltaY > 10) {
+                if (!touchClone) {
+                    touchClone = createTouchClone(touchElement, touchPos);
+                }
+                updateTouchClone(touchPos);
+                
+                // Highlight drop zones
+                const targetElement = getElementAtPosition(touchPos.x, touchPos.y);
+                document.querySelectorAll('.apartment.missing').forEach(apt => {
+                    apt.classList.remove('drag-over');
+                });
+                
+                if (targetElement && targetElement.classList.contains('missing')) {
+                    targetElement.classList.add('drag-over');
+                }
+            }
+        }
+
+        function handleTouchEnd(e) {
+            if (!touchElement) return;
+            e.preventDefault();
+            
+            const touchPos = getTouchPos(e);
+            const targetElement = getElementAtPosition(touchPos.x, touchPos.y);
+            
+            // Clean up visual feedback
+            touchElement.classList.remove('dragging');
+            document.querySelectorAll('.apartment').forEach(apt => {
+                apt.classList.remove('drag-over');
+            });
+            
+            // Handle drop
+            if (targetElement && targetElement.classList.contains('missing')) {
+                const houseNumber = parseInt(targetElement.dataset.number);
+                const cardNumber = parseInt(touchElement.dataset.number);
+
+                if (cardNumber === houseNumber) {
+                    targetElement.textContent = cardNumber;
+                    targetElement.classList.remove('missing');
+                    targetElement.classList.add('student-filled');
+                    touchElement.classList.add('used');
+                    touchElement.style.pointerEvents = 'none';
+                    studentAnswers[houseNumber] = cardNumber;
+                    celebrateCorrectAnswer(targetElement);
+                    highlightPattern(houseNumber);
+                    updateStats();
+                    
+                    if (Object.keys(studentAnswers).length === missingNumbers.length) {
+                        showSuccess();
+                    }
+                } else {
+                    targetElement.style.background = '#FFCDD2';
+                    setTimeout(() => { targetElement.style.background = ''; }, 1000);
+                }
+            }
+            
+            // Clean up
+            removeTouchClone();
+            touchElement = null;
         }
 
         function handleApartmentClick(e) {
@@ -1042,18 +1246,24 @@
             Object.keys(studentAnswers).forEach(key => delete studentAnswers[key]);
             document.querySelectorAll('.apartment').forEach(apt => {
                 const num = parseInt(apt.dataset.number);
-                apt.classList.remove('student-filled', 'highlighted');
+                apt.classList.remove('student-filled', 'highlighted', 'drag-over');
                 if (!givenNumbers.includes(num)) {
                     apt.classList.add('missing');
                     apt.textContent = '';
                 }
             });
             document.querySelectorAll('.number-card').forEach(card => {
-                card.classList.remove('used');
+                card.classList.remove('used', 'dragging');
                 card.draggable = true;
+                card.style.pointerEvents = 'auto';
             });
             document.getElementById('patternHint').classList.remove('show');
             document.getElementById('successMessage').classList.remove('show');
+            
+            // Clean up any remaining touch elements
+            removeTouchClone();
+            touchElement = null;
+            
             updateStats();
         }
 
@@ -1157,8 +1367,16 @@
                 optionElement.className = 'quiz-option';
                 optionElement.textContent = option;
                 optionElement.draggable = true;
+                
+                // Mouse events
                 optionElement.addEventListener('dragstart', handleQuizDragStart);
                 optionElement.addEventListener('dragend', handleQuizDragEnd);
+                
+                // Touch events
+                optionElement.addEventListener('touchstart', handleQuizTouchStart, { passive: false });
+                optionElement.addEventListener('touchmove', handleQuizTouchMove, { passive: false });
+                optionElement.addEventListener('touchend', handleQuizTouchEnd, { passive: false });
+                
                 optionsGrid.appendChild(optionElement);
             });
         }
@@ -1188,6 +1406,80 @@
                 draggedQuizElement.classList.add('used');
                 draggedQuizElement.draggable = false;
             }
+        }
+
+        // Touch Event Handlers for Quiz
+        function handleQuizTouchStart(e) {
+            if (e.target.classList.contains('used')) return;
+            
+            e.preventDefault();
+            const touchPos = getTouchPos(e);
+            touchStartX = touchPos.x;
+            touchStartY = touchPos.y;
+            touchElement = e.target;
+            
+            // Add visual feedback
+            e.target.classList.add('dragging');
+            
+            // Create clone after a short delay
+            setTimeout(() => {
+                if (touchElement === e.target) {
+                    touchClone = createTouchClone(e.target, touchPos);
+                }
+            }, 100);
+        }
+
+        function handleQuizTouchMove(e) {
+            if (!touchElement) return;
+            e.preventDefault();
+            
+            const touchPos = getTouchPos(e);
+            const deltaX = Math.abs(touchPos.x - touchStartX);
+            const deltaY = Math.abs(touchPos.y - touchStartY);
+            
+            // Start dragging if moved enough
+            if (deltaX > 10 || deltaY > 10) {
+                if (!touchClone) {
+                    touchClone = createTouchClone(touchElement, touchPos);
+                }
+                updateTouchClone(touchPos);
+                
+                // Highlight drop zones
+                const targetElement = getElementAtPosition(touchPos.x, touchPos.y);
+                document.querySelectorAll('.drop-zone').forEach(zone => {
+                    zone.classList.remove('drag-over');
+                });
+                
+                if (targetElement && targetElement.classList.contains('drop-zone') && !targetElement.textContent.trim()) {
+                    targetElement.classList.add('drag-over');
+                }
+            }
+        }
+
+        function handleQuizTouchEnd(e) {
+            if (!touchElement) return;
+            e.preventDefault();
+            
+            const touchPos = getTouchPos(e);
+            const targetElement = getElementAtPosition(touchPos.x, touchPos.y);
+            
+            // Clean up visual feedback
+            touchElement.classList.remove('dragging');
+            document.querySelectorAll('.drop-zone').forEach(zone => {
+                zone.classList.remove('drag-over');
+            });
+            
+            // Handle drop
+            if (targetElement && targetElement.classList.contains('drop-zone') && !targetElement.textContent.trim()) {
+                targetElement.textContent = touchElement.textContent;
+                targetElement.classList.add('filled');
+                touchElement.classList.add('used');
+                touchElement.style.pointerEvents = 'none';
+            }
+            
+            // Clean up
+            removeTouchClone();
+            touchElement = null;
         }
 
         function checkQuizAnswer() {
@@ -1358,15 +1650,45 @@
                 zone.className = 'drop-zone';
             });
             document.querySelectorAll('.quiz-option').forEach(option => {
-                option.classList.remove('used');
+                option.classList.remove('used', 'dragging');
                 option.draggable = true;
+                option.style.pointerEvents = 'auto';
             });
             document.getElementById('feedback').style.display = 'none';
             document.getElementById('nextBtn').style.display = 'none';
+            
+            // Clean up any remaining touch elements
+            removeTouchClone();
+            touchElement = null;
         }
 
         // Initialize on load
-        window.addEventListener('load', initializeActivity);
+        window.addEventListener('load', () => {
+            detectTouchDevice();
+            initializeActivity();
+            
+            // Add touch device specific styling and behavior
+            if (isTouchDevice) {
+                document.body.style.userSelect = 'none';
+                document.body.style.webkitUserSelect = 'none';
+                document.body.style.webkitTouchCallout = 'none';
+                
+                // Prevent scrolling when dragging
+                document.addEventListener('touchmove', (e) => {
+                    if (touchElement) {
+                        e.preventDefault();
+                    }
+                }, { passive: false });
+                
+                // Add touch-friendly instruction
+                const touchInstruction = document.createElement('div');
+                touchInstruction.className = 'touch-instruction';
+                touchInstruction.innerHTML = '📱 Touch & Hold then Drag numbers to apartments';
+                
+                const instructions = document.querySelector('.instructions');
+                instructions.insertBefore(touchInstruction, instructions.firstChild);
+            }
+        });
     </script>
 </body>
 </html>
